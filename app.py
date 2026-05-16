@@ -78,23 +78,17 @@ _ATTRIBUTION_LINE = (
 def _render_header_row() -> None:
     info = get_version_info()
     build_line = footer_markdown(info)
-    try:
-        col_main, col_info = st.columns([2.4, 1], gap="medium", vertical_alignment="top")
-    except TypeError:
-        col_main, col_info = st.columns([2.4, 1], gap="medium")
-    with col_main:
-        st.title(APP_TITLE)
-        st.caption(
-            "Data loads automatically from cache or live sources. Use **Refresh data** "
-            "on each tab to fetch again."
+    st.title(APP_TITLE)
+    st.caption(
+        "Data loads automatically from cache or live sources. Use **Refresh data** "
+        "on each tab to fetch again."
+    )
+    with st.container(border=True):
+        render_app_info_panel(
+            single_api_blurb=_SINGLE_API_BLURB,
+            build_line=build_line,
+            attribution_line=_ATTRIBUTION_LINE,
         )
-    with col_info:
-        with st.container(border=True):
-            render_app_info_panel(
-                single_api_blurb=_SINGLE_API_BLURB,
-                build_line=build_line,
-                attribution_line=_ATTRIBUTION_LINE,
-            )
 
 
 _render_header_row()
