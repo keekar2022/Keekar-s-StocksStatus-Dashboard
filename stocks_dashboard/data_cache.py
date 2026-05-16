@@ -6,9 +6,10 @@
 from __future__ import annotations
 
 import json
+import os
 import pickle
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -23,6 +24,40 @@ OHLCV_FILE = CACHE_DIR / "ohlcv.pkl"
 def symbols_key(symbols: list[str]) -> str:
     """Stable cache key from normalized symbol list."""
     return "|".join(s.strip().upper() for s in symbols if s.strip())
+
+
+def cache_ttl_hours() -> float | None:
+    """
+    Max age for disk cache before auto-refresh on load.
+
+    ``OHLCV_CACHE_TTL_HOURS`` default 24. Set ``0`` to disable age-based expiry
+    (cache used until **Refresh data**).
+    """
+    raw = (os.environ.get("OHLCV_CACHE_TTL_HOURS") or "24").strip().lower()
+    if raw in ("0", "none", "off", "false", "disable", "disabled"):
+        return None
+    try:
+        hours = float(raw)
+        return max(0.01, hours) if hours > 0 else None
+    except ValueError:
+        return 24.0
+
+
+def cache_is_fresh(fetched_at: str) -> bool:
+    """True if ``fetched_at`` ISO timestamp is within ``cache_ttl_hours()``."""
+    if not (fetched_at or "").strip():
+        return False
+    ttl = cache_ttl_hours()
+    if ttl is None:
+        return True
+    try:
+        dt = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return False
+    age = datetime.now(timezone.utc) - dt.astimezone(timezone.utc)
+    return age <= timedelta(hours=ttl)
 
 
 @dataclass

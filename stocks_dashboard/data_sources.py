@@ -2,12 +2,10 @@
 # Contact: mukesh.kesharwani@adobe.com
 
 """
-Single-source data router (EODHD-first) with optional legacy multi-source chain.
+OHLCV router: Yahoo-first (default), EODHD-first, or legacy multi-source chain.
 
-After the single-API refactor, OHLCV and fundamentals are served by **EODHD**
-(`stocks_dashboard.eodhd_client`). SEC EDGAR is kept as a free, US-only
-enhancer for fundamentals. Yahoo / Alpha Vantage / Investing.com paths remain
-in the codebase but are only used when ``LEGACY_SOURCES=true`` is set in env.
+Indicators (MACD, RSI, etc.) are computed locally from OHLCV via ``ta`` — not
+fetched from EODHD. SEC EDGAR remains a free US-only fundamentals enhancer.
 """
 
 from __future__ import annotations
@@ -38,10 +36,20 @@ def _legacy_enabled() -> bool:
     return raw in ("1", "true", "yes", "on")
 
 
-def _ohlcv_fallback_enabled() -> bool:
-    """When EODHD fails (e.g. NSE on a US-only key), try Yahoo OHLCV before giving up."""
+def _ohlcv_primary_mode() -> str:
+    """``yahoo`` (default) or ``eodhd`` — ignored when ``LEGACY_SOURCES=true``."""
+    raw = (os.environ.get("OHLCV_PRIMARY") or "yahoo").strip().lower()
+    return raw if raw in ("yahoo", "eodhd") else "yahoo"
+
+
+def _ohlcv_cross_fallback_enabled() -> bool:
+    """When the primary OHLCV provider fails, try the other (Yahoo ↔ EODHD)."""
     raw = (os.environ.get("EODHD_OHLCV_FALLBACK") or "true").strip().lower()
     return raw not in ("0", "false", "no", "off")
+
+
+def _has_eodhd_key() -> bool:
+    return bool((os.environ.get("EODHD_API_KEY") or "").strip())
 
 
 def _align_ohlcv_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -81,7 +89,7 @@ def _ohlcv_eodhd_only(symbol: str) -> ResolvedOHLCV:
     except EODHDError as exc:
         tried.append(f"eodhd ({sym}): {exc}")
 
-    if not _ohlcv_fallback_enabled():
+    if not _ohlcv_cross_fallback_enabled():
         raise YahooOHLCVError(
             f"EODHD OHLCV failed for {symbol}: {tried[0]}"
         ) from None
@@ -105,6 +113,43 @@ def _ohlcv_eodhd_only(symbol: str) -> ResolvedOHLCV:
         f"Yahoo Finance fallback ({ysym}) — EODHD had no data for {sym}",
         tuple(tried) + ("yahoo",),
     )
+
+
+def _ohlcv_yahoo_first(symbol: str) -> ResolvedOHLCV:
+    """Yahoo chart API first; EODHD when Yahoo fails and a key is configured."""
+    from stocks_dashboard.yahoo_ohlcv import fetch_daily_history as yahoo_fetch_daily
+
+    sym = eodhd_normalize_symbol(symbol)
+    ysym = yahoo_symbol_from_eodhd(symbol)
+    tried: list[str] = []
+    try:
+        ydf = _align_ohlcv_columns(yahoo_fetch_daily(ysym))
+        return ResolvedOHLCV(ydf, f"Yahoo Finance ({ysym})", ("yahoo",))
+    except YahooOHLCVError as exc:
+        tried.append(f"yahoo ({ysym}): {exc}")
+
+    if not _ohlcv_cross_fallback_enabled() or not _has_eodhd_key():
+        hint = (
+            " Set EODHD_API_KEY for EODHD fallback, or check the Yahoo symbol mapping."
+            if not _has_eodhd_key()
+            else ""
+        )
+        raise YahooOHLCVError(
+            f"OHLCV unavailable for {symbol.strip().upper()}. " + " | ".join(tried) + hint
+        ) from None
+
+    try:
+        df = eodhd_fetch_ohlcv(symbol)
+        return ResolvedOHLCV(
+            df,
+            f"EODHD fallback ({sym}) — Yahoo had no data for {ysym}",
+            tuple(tried) + ("eodhd",),
+        )
+    except EODHDError as exc:
+        tried.append(f"eodhd ({sym}): {exc}")
+        raise YahooOHLCVError(
+            f"OHLCV unavailable for {symbol.strip().upper()}. " + " | ".join(tried)
+        ) from exc
 
 
 def _ohlcv_legacy_chain(symbol: str) -> ResolvedOHLCV:
@@ -153,12 +198,16 @@ def _ohlcv_legacy_chain(symbol: str) -> ResolvedOHLCV:
 
 def fetch_ohlcv_preferred(symbol: str) -> ResolvedOHLCV:
     """
-    Default: **EODHD only**.
+    OHLCV routing (``LEGACY_SOURCES`` overrides everything):
 
-    When ``LEGACY_SOURCES=true``, run the older Yahoo -> Alpha Vantage -> Investing chain.
+    - ``OHLCV_PRIMARY=yahoo`` (default): Yahoo → EODHD (if key + fallback enabled)
+    - ``OHLCV_PRIMARY=eodhd``: EODHD → Yahoo (if ``EODHD_OHLCV_FALLBACK`` enabled)
+    - ``LEGACY_SOURCES=true``: Yahoo → Alpha Vantage → Investing
     """
     if _legacy_enabled():
         return _ohlcv_legacy_chain(symbol)
+    if _ohlcv_primary_mode() == "yahoo":
+        return _ohlcv_yahoo_first(symbol)
     return _ohlcv_eodhd_only(symbol)
 
 

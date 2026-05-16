@@ -28,6 +28,7 @@ from stocks_dashboard.chart_patterns import scan_patterns
 from stocks_dashboard.data_cache import (
     CachedFundamental,
     CachedOHLCV,
+    cache_is_fresh,
     clear_cache,
     load_cache,
     save_cache,
@@ -42,6 +43,8 @@ from stocks_dashboard.nasdaq_datalink_client import NasdaqDataLinkError, fetch_d
 from stocks_dashboard.symbols import parse_symbols
 from stocks_dashboard.technical_indicators import compute_indicators, yahoo_pe_roic_enabled
 from stocks_dashboard.ui_charts import (
+    DisplayMode,
+    chart_display_mode_selector,
     render_candlestick,
     render_candlestick_with_overlays,
     render_indicator_lines,
@@ -49,6 +52,7 @@ from stocks_dashboard.ui_charts import (
 from stocks_dashboard.ui_screener import (
     inject_screener_like_css,
     render_app_info_panel,
+    render_page_footer,
     render_quote_hero,
 )
 from stocks_dashboard.secrets_loader import apply_streamlit_secrets
@@ -61,23 +65,48 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 APP_TITLE = "Keekar's Stocks Status Dashboard"
 
-st.set_page_config(page_title=APP_TITLE, layout="wide")
+st.set_page_config(
+    page_title=APP_TITLE,
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 apply_streamlit_secrets()
 inject_screener_like_css()
-_SINGLE_API_BLURB = (
-    "Single-API mode: **EODHD** serves global OHLCV. SEC EDGAR is a free US-only "
-    "fundamentals enhancer. Set `LEGACY_SOURCES=true` to re-enable the older Yahoo / "
-    "Alpha Vantage / Investing chain."
+_INFO_EXPANDER_CONTENT = (
+    "**OHLCV** defaults to **Yahoo** (`OHLCV_PRIMARY=yahoo`), with optional **EODHD** fallback. "
+    "**MACD, RSI, EMA, OBV, ADL, PSAR** are computed locally via the `ta` library — not licensed from EODHD. "
+    "SEC EDGAR is a free US-only fundamentals enhancer. Set `LEGACY_SOURCES=true` for the older multi-source chain.\n\n"
+    "**Data sources**\n"
+    "- **OHLCV:** Yahoo first, then EODHD if configured (`OHLCV_PRIMARY`, `EODHD_OHLCV_FALLBACK`).\n"
+    "- **Technicals:** derived from OHLCV in-app (`ta`); see `docs/FREE_TECHNICAL_DATA.md`.\n"
+    "- **Fundamentals:** EODHD attempt, then **SEC EDGAR** (US).\n"
+    "- **PE / ROIC (US):** annual ROIC from **SEC EDGAR** (free), optional Yahoo / EODHD.\n"
+    "- **Cache:** `OHLCV_CACHE_TTL_HOURS` (default 24) reduces repeat API calls.\n\n"
+    "If Yahoo and EODHD both fail for a ticker, check symbol suffix (e.g. `RELIANCE.NSE`) and your EODHD plan."
 )
 _ATTRIBUTION_LINE = (
-    "Innovator & concept: **Satyan Bansal** ([satyan.bansal@gmail.com](mailto:satyan.bansal@gmail.com)) · "
-    "Developer: **Mukesh Kesharwani**"
+    "Concept & Innovation: Satyan Bansal · Developer: Mukesh Kesharwani"
+)
+def _eodhd_key_warning() -> str | None:
+    primary = (os.environ.get("OHLCV_PRIMARY") or "yahoo").strip().lower()
+    if primary == "yahoo":
+        return (
+            "Optional: set `EODHD_API_KEY` for EODHD OHLCV fallback when Yahoo has no data. "
+            "**Local:** `.env` · **Streamlit Cloud:** App settings → **Secrets**."
+        )
+    return (
+        "Set `EODHD_API_KEY` for EODHD-first OHLCV. **Local:** `.env` · "
+        "**Streamlit Cloud:** App settings → **Secrets** (see `.streamlit/secrets.toml.example`)."
+    )
+_SEC_AGENT_INFO = (
+    "Optional: set `SEC_USER_AGENT` for free **US EDGAR** fundamentals (when EODHD fundamentals "
+    "are unavailable). Format: `AppName you@example.com` per "
+    "[SEC fair access](https://www.sec.gov/os/accessing-edgar-data). "
+    "**Local:** `.env` · **Streamlit Cloud:** App settings → **Secrets**."
 )
 
 
 def _render_header_row() -> None:
-    info = get_version_info()
-    build_line = footer_markdown(info)
     st.title(APP_TITLE)
     st.caption(
         "Data loads automatically from cache or live sources. Use **Refresh data** "
@@ -85,10 +114,21 @@ def _render_header_row() -> None:
     )
     with st.container(border=True):
         render_app_info_panel(
-            single_api_blurb=_SINGLE_API_BLURB,
-            build_line=build_line,
             attribution_line=_ATTRIBUTION_LINE,
+            expander_label="Data sources & API mode",
+            expander_content=_INFO_EXPANDER_CONTENT,
+            eodhd_warning=_eodhd_key_warning()
+            if not (os.environ.get("EODHD_API_KEY") or "").strip()
+            else None,
+            sec_info=_SEC_AGENT_INFO
+            if not (os.environ.get("SEC_USER_AGENT") or "").strip()
+            else None,
         )
+
+
+def _render_page_footer() -> None:
+    build_line = footer_markdown(get_version_info())
+    render_page_footer(build_line=build_line)
 
 
 _render_header_row()
@@ -194,8 +234,10 @@ def _ensure_data_loaded(syms: list[str]) -> None:
     if st.session_state.get("data_symbols_key") != key:
         st.session_state.data_symbols_key = key
         disk = load_cache(syms)
-        if disk:
+        if disk and cache_is_fresh(disk.fetched_at):
             _apply_cache_to_session(disk)
+        elif disk:
+            _fetch_all(syms)
         else:
             clear_cache()
             _fetch_all(syms)
@@ -203,8 +245,10 @@ def _ensure_data_loaded(syms: list[str]) -> None:
 
     if st.session_state.get("fundamentals_cache") is None and st.session_state.get("ohlcv_cache") is None:
         disk = load_cache(syms)
-        if disk:
+        if disk and cache_is_fresh(disk.fetched_at):
             _apply_cache_to_session(disk)
+        elif disk:
+            _fetch_all(syms)
         else:
             _fetch_all(syms)
 
@@ -303,11 +347,19 @@ If your plan does not include fundamentals (HTTP 403), it falls back to **SEC ED
                 st.warning(str(exc))
 
 
-def _render_technical_for_symbol(sym: str, full_hist: pd.DataFrame, primary_source: str) -> None:
+def _render_technical_for_symbol(
+    sym: str,
+    full_hist: pd.DataFrame,
+    primary_source: str,
+    *,
+    display: DisplayMode,
+) -> None:
     render_quote_hero(sym, full_hist, primary_source)
     is_us = _is_us(sym)
     bare_sym = _bare_symbol(sym)
-    val_ctx = load_valuation_context(sym, bare_sym) if is_us else None
+    val_ctx = (
+        load_valuation_context(sym, bare_sym, cik_map=_edgar_cik_map()) if is_us else None
+    )
     if not is_us:
         st.caption("Non-US listing — **PE / ROIC** use EODHD fundamentals when that add-on is enabled.")
     elif val_ctx is not None:
@@ -322,7 +374,9 @@ def _render_technical_for_symbol(sym: str, full_hist: pd.DataFrame, primary_sour
         except YahooOHLCVError as exc:
             st.error(str(exc))
             return
-        if horizon in ("1M", "6M") and len(win) < 200:
+        if horizon == "1W":
+            st.caption("~**One trading week** (5 sessions).")
+        if horizon in ("1W", "1M", "6M") and len(win) < 200:
             st.warning(
                 "This window is shorter than 200 trading sessions; **EMA(200)** will be mostly undefined."
             )
@@ -353,12 +407,14 @@ def _render_technical_for_symbol(sym: str, full_hist: pd.DataFrame, primary_sour
                 ["EMA_20", "EMA_50", "EMA_200"],
                 title="OHLC with EMAs",
                 chart_key=_chart_key(sym, horizon, "ohlc_ema"),
+                display=display,
             )
             render_indicator_lines(
                 win,
                 ["Close", "PSAR"],
                 title="Close vs PSAR",
                 chart_key=_chart_key(sym, horizon, "psar"),
+                display=display,
             )
 
         with st.expander(
@@ -371,12 +427,14 @@ def _render_technical_for_symbol(sym: str, full_hist: pd.DataFrame, primary_sour
                 ["MACD", "MACD_signal", "MACD_hist"],
                 title="MACD",
                 chart_key=_chart_key(sym, horizon, "macd"),
+                display=display,
             )
             render_indicator_lines(
                 out,
                 ["RSI_14"],
                 title="RSI (14)",
                 chart_key=_chart_key(sym, horizon, "rsi"),
+                display=display,
             )
 
         with st.expander(
@@ -385,10 +443,18 @@ def _render_technical_for_symbol(sym: str, full_hist: pd.DataFrame, primary_sour
             key=_chart_key(sym, horizon, "exp_volume"),
         ):
             render_indicator_lines(
-                out, ["OBV"], title="OBV", chart_key=_chart_key(sym, horizon, "obv")
+                out,
+                ["OBV"],
+                title="OBV",
+                chart_key=_chart_key(sym, horizon, "obv"),
+                display=display,
             )
             render_indicator_lines(
-                out, ["ADL"], title="ADL", chart_key=_chart_key(sym, horizon, "adl")
+                out,
+                ["ADL"],
+                title="ADL",
+                chart_key=_chart_key(sym, horizon, "adl"),
+                display=display,
             )
 
         if is_us and val_ctx is not None:
@@ -409,6 +475,7 @@ def _render_technical_for_symbol(sym: str, full_hist: pd.DataFrame, primary_sour
                             ["PE_TTM_proxy"],
                             title="PE (TTM proxy)",
                             chart_key=_chart_key(sym, horizon, "pe"),
+                            display=display,
                         )
                         if val_ctx.eodhd_trailing_pe is not None and not yahoo_pe_roic_enabled():
                             st.caption(
@@ -420,12 +487,14 @@ def _render_technical_for_symbol(sym: str, full_hist: pd.DataFrame, primary_sour
                             "No PE data. Enable `EODHD_FUNDAMENTALS_ENABLED=true` or `YAHOO_PE_ROIC_ENABLE=true`."
                         )
 
-        if is_us and val_ctx is not None and horizon == "5Y":
+        if is_us and val_ctx is not None and horizon in ("1Y", "5Y"):
             with st.expander(
-                "ROIC — annual approximation (Yahoo statements)",
+                "ROIC — annual approximation",
                 expanded=False,
                 key=_chart_key(sym, horizon, "exp_roic"),
             ):
+                if val_ctx.roic_annual_source:
+                    st.caption(f"Source: **{val_ctx.roic_annual_source}**")
                 if not val_ctx.roic_annual.empty:
                     st.dataframe(
                         val_ctx.roic_annual,
@@ -437,15 +506,23 @@ def _render_technical_for_symbol(sym: str, full_hist: pd.DataFrame, primary_sour
                         ["ROIC_approx"],
                         title="ROIC (annual approx)",
                         chart_key=_chart_key(sym, horizon, "roic_annual"),
+                        display=display,
                     )
                 else:
                     st.caption(
-                        "No annual ROIC table (requires `YAHOO_PE_ROIC_ENABLE=true` and reachable Yahoo)."
+                        "No annual ROIC rows. For US tickers: set `SEC_USER_AGENT` (free **SEC EDGAR**), "
+                        "or enable `YAHOO_PE_ROIC_ENABLE` / EODHD fundamentals."
                     )
+                    if val_ctx.roic_annual_attempts:
+                        with st.expander("ROIC load attempts", expanded=False):
+                            for line in val_ctx.roic_annual_attempts:
+                                st.text(line)
 
-    t1m, t6m, t1y, t5y = st.tabs(
-        ["1 month (~21)", "6 months (~126)", "1 year (~252)", "5 years"],
+    tw, t1m, t6m, t1y, t5y = st.tabs(
+        ["1 week (~5)", "1 month (~21)", "6 months (~126)", "1 year (~252)", "5 years"],
     )
+    with tw:
+        _render_horizon("1W")
     with t1m:
         _render_horizon("1M")
     with t6m:
@@ -459,10 +536,11 @@ def _render_technical_for_symbol(sym: str, full_hist: pd.DataFrame, primary_sour
 def _render_technical_tab(syms: list[str]) -> None:
     st.markdown(
         """
-**Technical indicators** use **EODHD** OHLCV. Per horizon: **EMA**, **MACD**, **RSI**, **OBV**, **ADL**, **PSAR**, and optional **PE / ROIC**.
+**Technical indicators:** OHLCV from Yahoo and/or EODHD; **MACD, RSI, EMA, OBV, ADL, PSAR** computed locally (`ta`). Horizons: **1 week** through **5 years**. Optional **PE / ROIC**. Use **View charts as** for table view.
         """
     )
     refresh = _refresh_toolbar("refresh_tech")
+    display = chart_display_mode_selector("technical")
 
     if refresh:
         with st.spinner("Refreshing OHLCV…"):
@@ -491,7 +569,9 @@ def _render_technical_tab(syms: list[str]) -> None:
         if cached.df is None or cached.df.empty:
             st.warning(f"**{key}** — no OHLCV data.")
             continue
-        _render_technical_for_symbol(key, cached.df, cached.primary_source)
+        _render_technical_for_symbol(
+            key, cached.df, cached.primary_source, display=display
+        )
 
 
 def _render_patterns_tab(syms: list[str]) -> None:
@@ -501,6 +581,7 @@ def _render_patterns_tab(syms: list[str]) -> None:
         """
     )
     refresh = _refresh_toolbar("refresh_pat")
+    display = chart_display_mode_selector("patterns")
 
     if refresh:
         with st.spinner("Refreshing OHLCV for patterns…"):
@@ -513,7 +594,13 @@ def _render_patterns_tab(syms: list[str]) -> None:
         st.info("No OHLCV data loaded yet.")
         return
 
-    def _pattern_horizon(full_hist: pd.DataFrame, horizon: Horizon, sym_key: str) -> None:
+    def _pattern_horizon(
+        full_hist: pd.DataFrame,
+        horizon: Horizon,
+        sym_key: str,
+        *,
+        display: DisplayMode,
+    ) -> None:
         try:
             win = slice_trading_window(full_hist, horizon)
         except YahooOHLCVError as exc:
@@ -531,6 +618,7 @@ def _render_patterns_tab(syms: list[str]) -> None:
             win,
             title="OHLC",
             chart_key=_chart_key(sym_key, horizon, "pat_ohlc"),
+            display=display,
         )
 
     for sym in syms:
@@ -552,47 +640,16 @@ def _render_patterns_tab(syms: list[str]) -> None:
             ["1 week (~5)", "1 month (~21)", "6 months (~126)", "1 year (~252)", "5 years"],
         )
         with tw:
-            _pattern_horizon(full_hist, "1W", key)
+            _pattern_horizon(full_hist, "1W", key, display=display)
         with tm:
-            _pattern_horizon(full_hist, "1M", key)
+            _pattern_horizon(full_hist, "1M", key, display=display)
         with ts_tab:
-            _pattern_horizon(full_hist, "6M", key)
+            _pattern_horizon(full_hist, "6M", key, display=display)
         with ty:
-            _pattern_horizon(full_hist, "1Y", key)
+            _pattern_horizon(full_hist, "1Y", key, display=display)
         with tf:
-            _pattern_horizon(full_hist, "5Y", key)
+            _pattern_horizon(full_hist, "5Y", key, display=display)
 
-
-with st.sidebar:
-    st.subheader("Data sources")
-    st.markdown(
-        """
-- **EODHD** for OHLCV (`SYMBOL.EXCHANGE`, e.g. `AAPL.US`, `RELIANCE.NSE`).
-- **Fundamentals:** EODHD first, then **SEC EDGAR** (US).
-- **PE / ROIC:** EODHD or optional Yahoo (`YAHOO_PE_ROIC_ENABLE=true`).
-- **Legacy chain:** `LEGACY_SOURCES=true`.
-        """
-    )
-    if not (os.environ.get("EODHD_API_KEY") or "").strip():
-        st.warning(
-            "Set `EODHD_API_KEY` to load OHLCV. **Local:** `.env` · "
-            "**Streamlit Cloud:** App settings → **Secrets** (see `.streamlit/secrets.toml.example`)."
-        )
-    else:
-        st.caption(
-            "NSE/BSE symbols (e.g. `BHEL.NSE`) need an **EODHD All-World** plan. "
-            "Free/trial keys are often **US-only**; those tickers show an error while US symbols still load."
-        )
-    if not (os.environ.get("SEC_USER_AGENT") or "").strip():
-        st.info(
-            "Optional: set `SEC_USER_AGENT` for free **US EDGAR** fundamentals (when EODHD fundamentals "
-            "are unavailable). Format: `AppName you@example.com` per "
-            "[SEC fair access](https://www.sec.gov/os/accessing-edgar-data). "
-            "**Local:** `.env` · **Streamlit Cloud:** App settings → **Secrets**."
-        )
-
-    if st.button("Refresh all", type="secondary", key="refresh_all"):
-        st.session_state._refresh_all = True
 
 if "symbols_text" not in st.session_state:
     st.session_state.symbols_text = load_symbols_text()
@@ -602,11 +659,17 @@ def _persist_symbols() -> None:
     save_symbols_text(st.session_state.symbols_text)
 
 
-symbols_text = st.text_input(
-    "Symbols (comma-separated, max 10) — use `SYMBOL.EXCHANGE`; bare symbols default to `.US`",
-    key="symbols_text",
-    on_change=_persist_symbols,
-)
+_sym_col, _refresh_col = st.columns([5, 1])
+with _sym_col:
+    symbols_text = st.text_input(
+        "Symbols (comma-separated, max 10) — use `SYMBOL.EXCHANGE`; bare symbols default to `.US`",
+        key="symbols_text",
+        on_change=_persist_symbols,
+    )
+with _refresh_col:
+    st.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
+    if st.button("Refresh all", type="secondary", key="refresh_all", use_container_width=True):
+        st.session_state._refresh_all = True
 syms, err = parse_symbols(symbols_text)
 if err:
     st.error(err)
@@ -619,6 +682,7 @@ if syms and st.session_state.pop("_refresh_all", False):
 if syms:
     _ensure_data_loaded(syms)
 
+st.markdown("##### Select section")
 tab_fund, tab_tech, tab_pat = st.tabs(
     ["Fundamental", "Technical Indicators", "Patterns"],
 )
@@ -640,3 +704,5 @@ with tab_pat:
         st.info("Enter valid tickers above.")
     else:
         _render_patterns_tab(syms)
+
+_render_page_footer()

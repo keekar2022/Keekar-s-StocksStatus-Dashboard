@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 
 from stocks_dashboard.eodhd_client import EODHDError
+from stocks_dashboard.roic import _approx_roic_rows
 
 
 def _to_float(raw: Any) -> float | None:
@@ -62,6 +63,74 @@ def _last_five_periods(*series: dict[pd.Timestamp, float]) -> list[pd.Timestamp]
     if not keys:
         return []
     return sorted(keys)[-5:]
+
+
+def roic_annual_from_eodhd(payload: dict[str, Any]) -> pd.DataFrame:
+    """Annual ROIC from EODHD ``Financials.yearly`` blocks (when fundamentals add-on is enabled)."""
+    if not isinstance(payload, dict) or not payload:
+        return pd.DataFrame()
+    financials = payload.get("Financials")
+    if not isinstance(financials, dict):
+        return pd.DataFrame()
+
+    op_s = _series_for_field(financials, "Income_Statement", ("operatingIncome", "ebit", "ebitda"))
+    tax_s = _series_for_field(financials, "Income_Statement", ("incomeTaxExpense", "taxProvision"))
+    pre_s = _series_for_field(
+        financials,
+        "Income_Statement",
+        ("incomeBeforeTax", "earningsBeforeTax", "pretaxIncome"),
+    )
+    lt_s = _series_for_field(
+        financials,
+        "Balance_Sheet",
+        ("longTermDebt", "longTermDebtNoncurrent"),
+    )
+    st_s = _series_for_field(
+        financials,
+        "Balance_Sheet",
+        ("shortTermDebt", "shortLongTermDebt", "currentDebt"),
+    )
+    eq_s = _series_for_field(
+        financials,
+        "Balance_Sheet",
+        ("totalStockholderEquity", "totalStockholdersEquity", "commonStockholdersEquity"),
+    )
+    cash_s = _series_for_field(
+        financials,
+        "Balance_Sheet",
+        ("cash", "cashAndCashEquivalents", "cashAndShortTermInvestments"),
+    )
+
+    periods = _last_five_periods(op_s, eq_s, lt_s, st_s)
+    if not periods:
+        return pd.DataFrame()
+
+    def by_year(series: dict[pd.Timestamp, float]) -> dict[int, float]:
+        out: dict[int, float] = {}
+        for ts, val in series.items():
+            out[int(ts.year)] = val
+        return out
+
+    op_by = by_year(op_s)
+    tax_by = by_year(tax_s)
+    pretax_by = by_year(pre_s)
+    eq_by = by_year(eq_s)
+    cash_by = by_year(cash_s)
+    debt_by: dict[int, float] = {}
+    for fy in set(by_year(lt_s)) | set(by_year(st_s)):
+        debt_by[fy] = by_year(st_s).get(fy, 0.0) + by_year(lt_s).get(fy, 0.0)
+
+    years_sorted = [int(p.year) for p in periods]
+    rows = _approx_roic_rows(
+        years_sorted,
+        op_by=op_by,
+        tax_by=tax_by,
+        pretax_by=pretax_by,
+        debt_by=debt_by,
+        equity_by=eq_by,
+        cash_by=cash_by,
+    )
+    return pd.DataFrame(rows)
 
 
 def fundamentals_table_from_eodhd(payload: dict[str, Any]) -> pd.DataFrame:
