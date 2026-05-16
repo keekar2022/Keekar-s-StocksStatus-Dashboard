@@ -1,0 +1,76 @@
+name: Generate SBOM
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - production
+  pull_request:
+    branches:
+      - main
+      - master
+      - production
+
+jobs:
+  generate-sbom:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install cdxgen
+        run: npm install -g @cyclonedx/cdxgen
+
+      - name: Create docs directory
+        run: mkdir -p docs
+
+      - name: Generate SBOM
+        run: |
+          cdxgen -t python -r -o docs/sbom.json \
+            --spec-version 1.5 \
+            --json-pretty \
+            --evidence \
+            --include-formulation
+        env:
+          FETCH_LICENSE: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate CBOM
+        run: |
+          cdxgen -t python --include-crypto -r -o docs/cbom.json \
+            --spec-version 1.5 \
+            --json-pretty
+        env:
+          FETCH_LICENSE: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify SBOM
+        run: |
+          test -f docs/sbom.json
+          ls -lh docs/sbom.json
+
+      - name: Commit SBOM/CBOM
+        if: github.event_name == 'push'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add docs/sbom.json docs/cbom.json
+          git diff --staged --quiet || git commit -m "chore: Update SBOM/CBOM [skip ci]"
+          git push
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: docs/sbom.json
+          retention-days: 90

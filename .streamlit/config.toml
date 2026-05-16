@@ -1,0 +1,14 @@
+# Concept: Mukesh Kesharwani
+# Contact: mukesh.kesharwani@adobe.com
+#
+# Screener.in–adjacent calm green accent (original theme choice; not affiliated with screener.in).
+
+[theme]
+primaryColor = "#059669"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0fdf4"
+textColor = "#0f172a"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
