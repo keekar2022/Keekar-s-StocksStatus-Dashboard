@@ -2,10 +2,10 @@
 # Concept: Mukesh Kesharwani
 # Contact: mukesh.kesharwani@adobe.com
 
-__version__ = "2026.05.16+0411a1f"
-__git_sha__ = "0411a1f"
-__git_sha_full__ = "0411a1fb1db19ace7292a54892e0c7ee94048f87"
+__version__ = "2026.05.16+336979e"
+__git_sha__ = "336979e"
+__git_sha_full__ = "336979ec49ea4b34f6729d336f2f855cdc9b37d4"
 __git_branch__ = "main"
-__build_time_utc__ = "2026-05-16T21:16:15Z"
+__build_time_utc__ = "2026-05-16T21:22:09Z"
 __repo_url__ = "https://github.com/keekar2022/Keekar-s-StocksStatus-Dashboard"
-__commit_url__ = "https://github.com/keekar2022/Keekar-s-StocksStatus-Dashboard/commit/0411a1fb1db19ace7292a54892e0c7ee94048f87"
+__commit_url__ = "https://github.com/keekar2022/Keekar-s-StocksStatus-Dashboard/commit/336979ec49ea4b34f6729d336f2f855cdc9b37d4"
