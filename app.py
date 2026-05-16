@@ -1,5 +1,5 @@
-# Concept: Mukesh Kesharwani
-# Contact: mukesh.kesharwani@adobe.com
+# Innovator & concept: Satyan Bansal — satyan.bansal@gmail.com
+# Developer: Mukesh Kesharwani — mukesh.kesharwani@adobe.com
 """
 Streamlit POC — Keekar's Stocks Status Dashboard.
 
@@ -47,6 +47,7 @@ from stocks_dashboard.ui_charts import (
     render_indicator_lines,
 )
 from stocks_dashboard.ui_screener import inject_screener_like_css, render_quote_hero
+from stocks_dashboard.secrets_loader import apply_streamlit_secrets
 from stocks_dashboard.user_prefs import load_symbols_text, save_symbols_text
 from stocks_dashboard.valuation import attach_pe_to_frame, load_valuation_context
 from stocks_dashboard.version_info import footer_markdown, get_version_info
@@ -57,6 +58,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 APP_TITLE = "Keekar's Stocks Status Dashboard"
 
 st.set_page_config(page_title=APP_TITLE, layout="wide")
+apply_streamlit_secrets()
 inject_screener_like_css()
 st.title(APP_TITLE)
 st.caption(
@@ -71,9 +73,18 @@ st.caption(
 def _render_version_footer() -> None:
     info = get_version_info()
     line = footer_markdown(info)
+    credit = (
+        "**Innovator:** Satyan Bansal · **Developer:** Mukesh Kesharwani  \n"
+        "Concept by Satyan; implementation by Mukesh."
+    )
     st.sidebar.caption(f"**{APP_TITLE}**")
+    st.sidebar.caption(credit)
     st.sidebar.caption(line)
     st.caption(f"Build: {line}")
+    st.caption(
+        "Innovator & concept: **Satyan Bansal** (satyan.bansal@gmail.com) · "
+        "Developer: **Mukesh Kesharwani**"
+    )
 
 
 _render_version_footer()
@@ -480,14 +491,22 @@ with st.sidebar:
         """
     )
     if not (os.environ.get("EODHD_API_KEY") or "").strip():
-        st.warning("Set `EODHD_API_KEY` in `.env` to load OHLCV.")
+        st.warning(
+            "Set `EODHD_API_KEY` to load OHLCV. **Local:** `.env` · "
+            "**Streamlit Cloud:** App settings → **Secrets** (see `.streamlit/secrets.toml.example`)."
+        )
     else:
         st.caption(
             "NSE/BSE symbols (e.g. `BHEL.NSE`) need an **EODHD All-World** plan. "
             "Free/trial keys are often **US-only**; those tickers show an error while US symbols still load."
         )
     if not (os.environ.get("SEC_USER_AGENT") or "").strip():
-        st.info("Set `SEC_USER_AGENT` for US EDGAR fundamentals.")
+        st.info(
+            "Optional: set `SEC_USER_AGENT` for free **US EDGAR** fundamentals (when EODHD fundamentals "
+            "are unavailable). Format: `AppName you@example.com` per "
+            "[SEC fair access](https://www.sec.gov/os/accessing-edgar-data). "
+            "**Local:** `.env` · **Streamlit Cloud:** App settings → **Secrets**."
+        )
 
     if st.button("Refresh all", type="secondary", key="refresh_all"):
         st.session_state._refresh_all = True

@@ -1,9 +1,9 @@
 ---
-concept: Mukesh Kesharwani
-contact: mukesh.kesharwani@adobe.com
+innovator: Satyan Bansal
+developer: Mukesh Kesharwani
 ---
 
-# Stocks Dashboard — portable plan & progress
+# Keekar's Stocks Status Dashboard — portable plan & progress
 
 Use this document in **any IDE** or share it as a **single reference** for what the POC does, how data flows, what to configure, and what was built so far. For deeper API detail, see [DATA_SOURCES.md](DATA_SOURCES.md).
 
@@ -28,18 +28,23 @@ streamlit run app.py
 
 3. Open the URL Streamlit prints (usually `http://localhost:8501`).
 4. Enter symbols using `SYMBOL.EXCHANGE` (e.g. `AAPL.US`, `RELIANCE.NSE`, `VOD.LSE`). Bare symbols default to `.<EODHD_DEFAULT_EXCHANGE>` (usually `.US`). Max 10 per run.
-5. Use the three tabs: **Fundamental**, **Technical Indicators**, **Patterns**.
+5. Use the three tabs: **Fundamental**, **Technical Indicators**, **Patterns**. Data **auto-loads**; use **Refresh data** per tab.
+
+**Attribution:** Concept by **Satyan Bansal**; implementation by **Mukesh Kesharwani** — see [CONTRIBUTORS.md](CONTRIBUTORS.md).
+
+**Streamlit Cloud:** Secrets, not `.env` — [STREAMLIT_CLOUD.md](STREAMLIT_CLOUD.md).
 
 ## Inputs (environment)
 
-Copy `.env.example` → `.env`. Summary:
+**Local:** copy `.env.example` → `.env`. **Hosted:** [STREAMLIT_CLOUD.md](STREAMLIT_CLOUD.md). Summary:
 
 | Input | Purpose |
 | ----- | ------- |
 | `EODHD_API_KEY` | **Required** for OHLCV; subscribe to "EOD Historical Data - All World" (~$18/mo) at [eodhd.com](https://eodhd.com). |
 | `EODHD_DEFAULT_EXCHANGE` | Suffix for bare symbols (default `US`). |
-| `EODHD_FUNDAMENTALS_ENABLED` | `true` to call EODHD fundamentals (separate paid add-on). Default `false`. |
-| `SEC_USER_AGENT` | Identifies your app to **SEC EDGAR**; required for free US fundamentals. |
+| `EODHD_FUNDAMENTALS_ENABLED` | Set `false` to skip EODHD fundamentals (EDGAR-only). Attempted when API key is set. |
+| `EODHD_OHLCV_FALLBACK` | Default `true` — Yahoo OHLCV if EODHD 404 (e.g. NSE on US-only key). |
+| `SEC_USER_AGENT` | Identifies your app to **SEC EDGAR**; required for free US fundamentals fallback. |
 | `LEGACY_SOURCES` | `true` to re-enable Yahoo / Alpha Vantage / Investing chain. Default `false`. |
 | `ALPHA_VANTAGE_API_KEY` | Legacy-only; only honoured when `LEGACY_SOURCES=true`. |
 | `ALPHA_VANTAGE_CALL_INTERVAL_SEC` | Legacy throttle between Alpha Vantage calls (default `12.5`). |

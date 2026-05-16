@@ -1,11 +1,22 @@
-# Concept: Mukesh Kesharwani
-# Contact: mukesh.kesharwani@adobe.com
+# Innovator & concept: Satyan Bansal — satyan.bansal@gmail.com
+# Developer: Mukesh Kesharwani — mukesh.kesharwani@adobe.com
 
 # Keekar's Stocks Status Dashboard
 
 Streamlit app for monitoring tickers (comma-separated, max **10**): **Fundamental**, **Technical Indicators**, and **Patterns** tabs.
 
 Repository: [keekar2022/Keekar-s-StocksStatus-Dashboard](https://github.com/keekar2022/Keekar-s-StocksStatus-Dashboard)
+
+## Authors & attribution
+
+| Role | Name | Contact |
+| --- | --- | --- |
+| **Innovator & concept** | Satyan Bansal | [satyan.bansal@gmail.com](mailto:satyan.bansal@gmail.com) |
+| **Developer (implementation)** | Mukesh Kesharwani | [mukesh.kesharwani@adobe.com](mailto:mukesh.kesharwani@adobe.com) |
+
+The dashboard **concept** — a single view of key stock parameters across fundamentals, technicals, and patterns — was introduced by **Satyan Bansal**. **Mukesh Kesharwani** developed the code, integrations, and UI in this repository.
+
+Full details: **[docs/CONTRIBUTORS.md](docs/CONTRIBUTORS.md)**
 
 ## Features
 
@@ -27,6 +38,16 @@ streamlit run app.py
 ```
 
 See **[docs/EODHD_API_KEY_SETUP.md](docs/EODHD_API_KEY_SETUP.md)** for API key setup and **[docs/DATA_SOURCES.md](docs/DATA_SOURCES.md)** for data routing.
+
+### Streamlit Community Cloud (share.streamlit.io)
+
+`.env` is **not** deployed. Set secrets in the hosted app — full guide: **[docs/STREAMLIT_CLOUD.md](docs/STREAMLIT_CLOUD.md)**.
+
+1. [share.streamlit.io](https://share.streamlit.io/) → your app → **⚙️ Settings** → **Secrets**
+2. Paste from [`.streamlit/secrets.toml.example`](.streamlit/secrets.toml.example) and replace values
+3. **Save** (app reboots)
+
+Minimum secrets: `EODHD_API_KEY`, `SEC_USER_AGENT` (format: `AppName you@example.com`).
 
 ## Version embedding
 

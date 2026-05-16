@@ -14,8 +14,10 @@ For architectural context and endpoint detail, see [EODHD_INTEGRATION.md](EODHD_
 1. Sign up at [https://eodhd.com/register](https://eodhd.com/register).
 2. Subscribe to **"EOD Historical Data - All World"** (~$17.99/mo) at [https://eodhd.com/pricing](https://eodhd.com/pricing) — or use the free trial / demo token first.
 3. Copy your API token from the dashboard at [https://eodhd.com/cp/dashboard](https://eodhd.com/cp/dashboard).
-4. Paste it into the project's `.env` as `EODHD_API_KEY=...`.
+4. Paste it into the project's `.env` as `EODHD_API_KEY=...` (local) or **Streamlit Cloud Secrets** (hosted).
 5. Run `streamlit run app.py` and load `AAPL.US`.
+
+**Hosted on Streamlit Cloud?** See [STREAMLIT_CLOUD.md](STREAMLIT_CLOUD.md) — use **App settings → Secrets**, not `.env`.
 
 ## 1. Choose how you'll evaluate vs. use long-term
 
@@ -144,7 +146,7 @@ In the browser:
 
 1. Confirm the sidebar does **not** show the yellow "Set `EODHD_API_KEY`" warning.
 2. In the symbol box, enter `AAPL.US, RELIANCE.NSE, VOD.LSE` (or just `AAPL.US` on the demo token).
-3. Click **Load technical indicators**. Each symbol's quote strip should read:
+3. Data should **auto-load**; or use **Refresh data** on a tab. Each symbol's quote strip should read:
 
 ```text
 EODHD (AAPL.US)
@@ -158,8 +160,8 @@ If the token leaks or you change plan:
 
 1. Sign in to [https://eodhd.com/cp/dashboard](https://eodhd.com/cp/dashboard).
 2. Open the API Token card and choose **Regenerate** (or revoke + create a new one if the UI offers that).
-3. Update `EODHD_API_KEY=...` in your local `.env`.
-4. Restart `streamlit run app.py`.
+3. Update `EODHD_API_KEY=...` in your local `.env` (or **Streamlit Cloud → Secrets** if hosted).
+4. Restart the app (`streamlit run app.py` locally, or save Secrets on Cloud).
 
 ## 8. Sharing this project with friends safely
 
