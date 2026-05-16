@@ -10,7 +10,6 @@ from typing import Any
 import pandas as pd
 
 from stocks_dashboard.eodhd_client import EODHDError
-from stocks_dashboard.roic import _approx_roic_rows
 
 
 def _to_float(raw: Any) -> float | None:
@@ -67,6 +66,8 @@ def _last_five_periods(*series: dict[pd.Timestamp, float]) -> list[pd.Timestamp]
 
 def roic_annual_from_eodhd(payload: dict[str, Any]) -> pd.DataFrame:
     """Annual ROIC from EODHD ``Financials.yearly`` blocks (when fundamentals add-on is enabled)."""
+    from stocks_dashboard.roic import _approx_roic_rows
+
     if not isinstance(payload, dict) or not payload:
         return pd.DataFrame()
     financials = payload.get("Financials")

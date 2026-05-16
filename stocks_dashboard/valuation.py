@@ -23,8 +23,6 @@ from stocks_dashboard.eodhd_client import (
     should_attempt_eodhd_fundamentals,
     valuation_snapshot,
 )
-from stocks_dashboard.eodhd_fundamentals import roic_annual_from_eodhd
-from stocks_dashboard.roic import roic_annual_from_edgar
 from stocks_dashboard.technical_indicators import (
     attach_pe_proxy,
     roic_annual_table,
@@ -55,6 +53,8 @@ def _yahoo_warning(exc: BaseException) -> str:
 
 
 def _load_edgar_roic_annual(bare_symbol: str, cik_map: dict[str, int] | None) -> tuple[pd.DataFrame, str]:
+    from stocks_dashboard.roic import roic_annual_from_edgar
+
     ua = (os.environ.get("SEC_USER_AGENT") or "").strip()
     if not ua:
         return pd.DataFrame(), "SEC EDGAR: skipped (no SEC_USER_AGENT)"
@@ -75,6 +75,8 @@ def _load_edgar_roic_annual(bare_symbol: str, cik_map: dict[str, int] | None) ->
 
 
 def _load_eodhd_roic_annual(symbol_with_exchange: str) -> tuple[pd.DataFrame, str]:
+    from stocks_dashboard.eodhd_fundamentals import roic_annual_from_eodhd
+
     if not should_attempt_eodhd_fundamentals():
         return pd.DataFrame(), "EODHD yearly: skipped (no key or EODHD_FUNDAMENTALS_ENABLED=false)"
     try:

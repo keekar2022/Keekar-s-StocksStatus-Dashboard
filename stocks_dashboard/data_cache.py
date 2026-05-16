@@ -20,6 +20,18 @@ META_FILE = CACHE_DIR / "meta.json"
 FUNDAMENTALS_FILE = CACHE_DIR / "fundamentals.pkl"
 OHLCV_FILE = CACHE_DIR / "ohlcv.pkl"
 
+__all__ = [
+    "CachedFundamental",
+    "CachedOHLCV",
+    "DashboardCache",
+    "cache_is_fresh",
+    "cache_ttl_hours",
+    "clear_cache",
+    "load_cache",
+    "save_cache",
+    "symbols_key",
+]
+
 
 def symbols_key(symbols: list[str]) -> str:
     """Stable cache key from normalized symbol list."""

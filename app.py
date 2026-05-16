@@ -24,16 +24,23 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
+from stocks_dashboard import data_cache
 from stocks_dashboard.chart_patterns import scan_patterns
-from stocks_dashboard.data_cache import (
-    CachedFundamental,
-    CachedOHLCV,
-    cache_is_fresh,
-    clear_cache,
-    load_cache,
-    save_cache,
-    symbols_key,
-)
+
+CachedFundamental = data_cache.CachedFundamental
+CachedOHLCV = data_cache.CachedOHLCV
+clear_cache = data_cache.clear_cache
+load_cache = data_cache.load_cache
+save_cache = data_cache.save_cache
+symbols_key = data_cache.symbols_key
+
+
+def _cache_is_fresh(fetched_at: str) -> bool:
+    """Use cache TTL helper when present (backward-compatible with older data_cache)."""
+    fn = getattr(data_cache, "cache_is_fresh", None)
+    if fn is None:
+        return False
+    return bool(fn(fetched_at))
 from stocks_dashboard.data_sources import fetch_ohlcv_preferred, load_fundamentals_auto
 from stocks_dashboard.yahoo_ohlcv import YahooOHLCVError
 from stocks_dashboard.edgar import EdgarError, fetch_ticker_cik_map
@@ -234,7 +241,7 @@ def _ensure_data_loaded(syms: list[str]) -> None:
     if st.session_state.get("data_symbols_key") != key:
         st.session_state.data_symbols_key = key
         disk = load_cache(syms)
-        if disk and cache_is_fresh(disk.fetched_at):
+        if disk and _cache_is_fresh(disk.fetched_at):
             _apply_cache_to_session(disk)
         elif disk:
             _fetch_all(syms)
@@ -245,7 +252,7 @@ def _ensure_data_loaded(syms: list[str]) -> None:
 
     if st.session_state.get("fundamentals_cache") is None and st.session_state.get("ohlcv_cache") is None:
         disk = load_cache(syms)
-        if disk and cache_is_fresh(disk.fetched_at):
+        if disk and _cache_is_fresh(disk.fetched_at):
             _apply_cache_to_session(disk)
         elif disk:
             _fetch_all(syms)
