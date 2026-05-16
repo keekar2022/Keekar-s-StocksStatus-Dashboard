@@ -108,4 +108,5 @@ def attach_pe_to_frame(
     if ctx.eodhd_trailing_pe is not None:
         out = out.copy()
         out["PE_TTM_proxy"] = float(ctx.eodhd_trailing_pe)
+        return out
     return out

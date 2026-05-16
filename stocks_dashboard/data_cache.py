@@ -36,9 +36,10 @@ class CachedFundamental:
 @dataclass
 class CachedOHLCV:
     symbol: str
-    df: pd.DataFrame
+    df: pd.DataFrame | None
     primary_source: str
     tried: tuple[str, ...]
+    error: str | None = None
 
 
 @dataclass
@@ -83,9 +84,10 @@ def load_cache(symbols: list[str]) -> DashboardCache | None:
     for sym, item in ohlcv_raw.items():
         ohlcv[sym] = CachedOHLCV(
             symbol=sym,
-            df=item["df"],
+            df=item.get("df"),
             primary_source=item["primary_source"],
             tried=tuple(item.get("tried", ())),
+            error=item.get("error"),
         )
     return DashboardCache(
         symbols_key=key,
@@ -121,6 +123,7 @@ def save_cache(
             "df": o.df,
             "primary_source": o.primary_source,
             "tried": list(o.tried),
+            "error": o.error,
         }
         for sym, o in ohlcv.items()
     }

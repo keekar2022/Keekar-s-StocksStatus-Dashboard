@@ -34,6 +34,7 @@ from stocks_dashboard.data_cache import (
     symbols_key,
 )
 from stocks_dashboard.data_sources import fetch_ohlcv_preferred, load_fundamentals_auto
+from stocks_dashboard.yahoo_ohlcv import YahooOHLCVError
 from stocks_dashboard.edgar import EdgarError, fetch_ticker_cik_map
 from stocks_dashboard.format_numbers import format_fundamentals_display
 from stocks_dashboard.fundamentals import direction_note
@@ -119,14 +120,23 @@ def _fetch_ohlcv_all(syms: list[str]) -> dict[str, CachedOHLCV]:
     out: dict[str, CachedOHLCV] = {}
     for sym in syms:
         time.sleep(0.35)
-        ohlcv_res = fetch_ohlcv_preferred(sym)
         key = sym.strip().upper()
-        out[key] = CachedOHLCV(
-            symbol=key,
-            df=ohlcv_res.df,
-            primary_source=ohlcv_res.primary_source,
-            tried=ohlcv_res.tried,
-        )
+        try:
+            ohlcv_res = fetch_ohlcv_preferred(sym)
+            out[key] = CachedOHLCV(
+                symbol=key,
+                df=ohlcv_res.df,
+                primary_source=ohlcv_res.primary_source,
+                tried=ohlcv_res.tried,
+            )
+        except YahooOHLCVError as exc:
+            out[key] = CachedOHLCV(
+                symbol=key,
+                df=None,
+                primary_source="unavailable",
+                tried=("error",),
+                error=str(exc),
+            )
     return out
 
 
@@ -185,6 +195,25 @@ def _format_fetched_at() -> str:
         return raw
 
 
+def _refresh_toolbar(button_key: str) -> bool:
+    """Last-updated caption and Refresh button on one row."""
+    fetched = _format_fetched_at()
+    try:
+        col_info, col_btn = st.columns([5, 1], vertical_alignment="center")
+    except TypeError:
+        col_info, col_btn = st.columns([5, 1])
+    with col_info:
+        if fetched:
+            st.caption(f"Last updated: **{fetched}**")
+    with col_btn:
+        return st.button(
+            "Refresh data",
+            type="primary",
+            key=button_key,
+            use_container_width=True,
+        )
+
+
 def _render_fundamentals_tab(syms: list[str]) -> None:
     st.markdown(
         """
@@ -192,13 +221,7 @@ def _render_fundamentals_tab(syms: list[str]) -> None:
 If your plan does not include fundamentals (HTTP 403), it falls back to **SEC EDGAR** for US tickers.
         """
     )
-    fetched = _format_fetched_at()
-    if fetched:
-        st.caption(f"Last updated: **{fetched}**")
-
-    col_btn, _ = st.columns([1, 4])
-    with col_btn:
-        refresh = st.button("Refresh data", type="primary", key="refresh_fund")
+    refresh = _refresh_toolbar("refresh_fund")
 
     if refresh:
         with st.spinner("Refreshing fundamentals…"):
@@ -305,20 +328,25 @@ def _render_technical_for_symbol(sym: str, full_hist: pd.DataFrame, primary_sour
 
         if is_us and val_ctx is not None:
             with st.expander("Valuation proxy (PE)", expanded=False):
-                pe = out[["PE_TTM_proxy"]].dropna(how="all")
-                if not pe.empty:
-                    render_indicator_lines(pe, ["PE_TTM_proxy"], title="PE (TTM proxy)")
-                    if val_ctx.eodhd_trailing_pe is not None and not yahoo_pe_roic_enabled():
-                        st.caption(
-                            f"Flat line: EODHD trailing P/E ≈ {val_ctx.eodhd_trailing_pe:.2f} "
-                            "(enable Yahoo for a daily TTM EPS series)."
-                        )
-                else:
+                if "PE_TTM_proxy" not in out.columns:
                     st.caption(
                         "No PE data. Enable `EODHD_FUNDAMENTALS_ENABLED=true` or `YAHOO_PE_ROIC_ENABLE=true`."
                     )
+                else:
+                    pe = out[["PE_TTM_proxy"]].dropna(how="all")
+                    if not pe.empty:
+                        render_indicator_lines(pe, ["PE_TTM_proxy"], title="PE (TTM proxy)")
+                        if val_ctx.eodhd_trailing_pe is not None and not yahoo_pe_roic_enabled():
+                            st.caption(
+                                f"Flat line: EODHD trailing P/E ≈ {val_ctx.eodhd_trailing_pe:.2f} "
+                                "(enable Yahoo for a daily TTM EPS series)."
+                            )
+                    else:
+                        st.caption(
+                            "No PE data. Enable `EODHD_FUNDAMENTALS_ENABLED=true` or `YAHOO_PE_ROIC_ENABLE=true`."
+                        )
 
-        if is_us and horizon == "5Y":
+        if is_us and val_ctx is not None and horizon == "5Y":
             with st.expander("ROIC — annual approximation (Yahoo statements)", expanded=False):
                 if not val_ctx.roic_annual.empty:
                     st.dataframe(val_ctx.roic_annual, use_container_width=True)
@@ -351,13 +379,7 @@ def _render_technical_tab(syms: list[str]) -> None:
 **Technical indicators** use **EODHD** OHLCV. Per horizon: **EMA**, **MACD**, **RSI**, **OBV**, **ADL**, **PSAR**, and optional **PE / ROIC**.
         """
     )
-    fetched = _format_fetched_at()
-    if fetched:
-        st.caption(f"Last updated: **{fetched}**")
-
-    col_btn, _ = st.columns([1, 4])
-    with col_btn:
-        refresh = st.button("Refresh data", type="primary", key="refresh_tech")
+    refresh = _refresh_toolbar("refresh_tech")
 
     if refresh:
         with st.spinner("Refreshing OHLCV…"):
@@ -377,6 +399,12 @@ def _render_technical_tab(syms: list[str]) -> None:
             st.warning(f"No cached OHLCV for {key}.")
             continue
         st.divider()
+        if cached.error:
+            st.error(f"**{key}** — {cached.error}")
+            continue
+        if cached.df is None or cached.df.empty:
+            st.warning(f"**{key}** — no OHLCV data.")
+            continue
         _render_technical_for_symbol(key, cached.df, cached.primary_source)
 
 
@@ -386,13 +414,7 @@ def _render_patterns_tab(syms: list[str]) -> None:
 **Pattern scan** uses cached **EODHD** OHLCV. Patterns are heuristic POC signals, not investment advice.
         """
     )
-    fetched = _format_fetched_at()
-    if fetched:
-        st.caption(f"Last updated: **{fetched}**")
-
-    col_btn, _ = st.columns([1, 4])
-    with col_btn:
-        refresh = st.button("Refresh data", type="primary", key="refresh_pat")
+    refresh = _refresh_toolbar("refresh_pat")
 
     if refresh:
         with st.spinner("Refreshing OHLCV for patterns…"):
@@ -422,8 +444,14 @@ def _render_patterns_tab(syms: list[str]) -> None:
         cached = ohlcv_map.get(key)
         if cached is None:
             continue
-        full_hist = cached.df
         st.divider()
+        if cached.error:
+            st.error(f"**{key}** — {cached.error}")
+            continue
+        if cached.df is None or cached.df.empty:
+            st.warning(f"**{key}** — no OHLCV data.")
+            continue
+        full_hist = cached.df
         render_quote_hero(key, full_hist, cached.primary_source)
 
         tw, tm, ts_tab, ty, tf = st.tabs(
@@ -453,6 +481,11 @@ with st.sidebar:
     )
     if not (os.environ.get("EODHD_API_KEY") or "").strip():
         st.warning("Set `EODHD_API_KEY` in `.env` to load OHLCV.")
+    else:
+        st.caption(
+            "NSE/BSE symbols (e.g. `BHEL.NSE`) need an **EODHD All-World** plan. "
+            "Free/trial keys are often **US-only**; those tickers show an error while US symbols still load."
+        )
     if not (os.environ.get("SEC_USER_AGENT") or "").strip():
         st.info("Set `SEC_USER_AGENT` for US EDGAR fundamentals.")
 

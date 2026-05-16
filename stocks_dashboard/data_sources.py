@@ -26,6 +26,7 @@ from stocks_dashboard.eodhd_client import (
     fetch_ohlcv as eodhd_fetch_ohlcv,
     normalize_symbol as eodhd_normalize_symbol,
     should_attempt_eodhd_fundamentals,
+    yahoo_symbol_from_eodhd,
 )
 from stocks_dashboard.eodhd_fundamentals import fundamentals_table_from_eodhd
 from stocks_dashboard.fundamentals import fundamentals_from_companyfacts
@@ -35,6 +36,24 @@ from stocks_dashboard.yahoo_ohlcv import YahooOHLCVError
 def _legacy_enabled() -> bool:
     raw = (os.environ.get("LEGACY_SOURCES") or "false").strip().lower()
     return raw in ("1", "true", "yes", "on")
+
+
+def _ohlcv_fallback_enabled() -> bool:
+    """When EODHD fails (e.g. NSE on a US-only key), try Yahoo OHLCV before giving up."""
+    raw = (os.environ.get("EODHD_OHLCV_FALLBACK") or "true").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def _align_ohlcv_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Match EODHD column names for shared technical-indicator code."""
+    out = df.copy()
+    if "Adjusted_close" not in out.columns and "Close" in out.columns:
+        out["Adjusted_close"] = out["Close"]
+    cols = ("Open", "High", "Low", "Close", "Adjusted_close", "Volume")
+    missing = [c for c in cols if c not in out.columns]
+    if missing:
+        raise YahooOHLCVError(f"OHLCV frame missing columns {missing}")
+    return out[list(cols)]
 
 
 @dataclass(frozen=True)
@@ -54,12 +73,38 @@ class FundamentalAutoResult:
 
 
 def _ohlcv_eodhd_only(symbol: str) -> ResolvedOHLCV:
+    sym = eodhd_normalize_symbol(symbol)
+    tried: list[str] = []
     try:
         df = eodhd_fetch_ohlcv(symbol)
+        return ResolvedOHLCV(df, f"EODHD ({sym})", ("eodhd",))
     except EODHDError as exc:
-        raise YahooOHLCVError(f"EODHD OHLCV failed for {symbol}: {exc}") from exc
-    sym = eodhd_normalize_symbol(symbol)
-    return ResolvedOHLCV(df, f"EODHD ({sym})", ("eodhd",))
+        tried.append(f"eodhd ({sym}): {exc}")
+
+    if not _ohlcv_fallback_enabled():
+        raise YahooOHLCVError(
+            f"EODHD OHLCV failed for {symbol}: {tried[0]}"
+        ) from None
+
+    from stocks_dashboard.yahoo_ohlcv import fetch_daily_history as yahoo_fetch_daily
+
+    ysym = yahoo_symbol_from_eodhd(symbol)
+    try:
+        ydf = _align_ohlcv_columns(yahoo_fetch_daily(ysym))
+    except YahooOHLCVError as exc:
+        tried.append(f"yahoo ({ysym}): {exc}")
+        raise YahooOHLCVError(
+            f"OHLCV unavailable for {symbol.strip().upper()}. "
+            + " | ".join(tried)
+            + " Tip: NSE/BSE tickers need an EODHD All-World subscription; "
+            "free API keys are often US-only."
+        ) from exc
+
+    return ResolvedOHLCV(
+        ydf,
+        f"Yahoo Finance fallback ({ysym}) — EODHD had no data for {sym}",
+        tuple(tried) + ("yahoo",),
+    )
 
 
 def _ohlcv_legacy_chain(symbol: str) -> ResolvedOHLCV:

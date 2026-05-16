@@ -39,6 +39,10 @@ class EODHDError(Exception):
     """Raised for any EODHD client failure (network, auth, parse, empty)."""
 
 
+class EODHDNotFoundError(EODHDError):
+    """Raised when the symbol/exchange is unknown or not on the current subscription."""
+
+
 class EODHDFundamentalsDisabled(EODHDError):
     """Raised when fundamentals are skipped via ``EODHD_FUNDAMENTALS_ENABLED=false``."""
 
@@ -78,6 +82,16 @@ def _fundamentals_enabled() -> bool:
     return should_attempt_eodhd_fundamentals()
 
 
+# User-facing exchange suffixes -> EODHD API codes (search / eod endpoints).
+_EXCHANGE_ALIASES: dict[str, str] = {
+    "NS": "NSE",
+    "NSE": "NSE",
+    "BO": "BSE",
+    "BSE": "BSE",
+    "BOM": "BSE",
+}
+
+
 def normalize_symbol(symbol: str) -> str:
     """
     Return ``SYMBOL.EXCHANGE`` upper-cased. Adds the default exchange when missing.
@@ -92,8 +106,52 @@ def normalize_symbol(symbol: str) -> str:
     if not sym:
         raise EODHDError("Empty symbol")
     if "." in sym:
-        return sym
+        base, exch = sym.rsplit(".", 1)
+        exch = _EXCHANGE_ALIASES.get(exch, exch)
+        return f"{base}.{exch}"
     return f"{sym}.{_default_exchange()}"
+
+
+def yahoo_symbol_from_eodhd(symbol: str) -> str:
+    """
+    Map ``SYMBOL.NSE`` style tickers to Yahoo Finance suffixes (e.g. ``SYMBOL.NS``).
+    """
+    sym = normalize_symbol(symbol)
+    if "." not in sym:
+        return sym
+    base, exch = sym.rsplit(".", 1)
+    yahoo_exch = {"NSE": "NS", "BSE": "BO"}.get(exch, exch)
+    return f"{base}.{yahoo_exch}"
+
+
+def _search_resolved_symbol(symbol: str) -> str | None:
+    """Use EODHD search API to resolve ``Code`` + ``Exchange`` for ambiguous tickers."""
+    bare = (symbol or "").strip().upper()
+    query = bare.split(".", 1)[0] if bare else ""
+    if not query:
+        return None
+    try:
+        hits = _get_json(f"search/{query}", {"limit": 15})
+    except EODHDError:
+        return None
+    if not isinstance(hits, list):
+        return None
+    want_exch = None
+    if "." in bare:
+        _, suffix = bare.rsplit(".", 1)
+        want_exch = _EXCHANGE_ALIASES.get(suffix, suffix)
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
+        code = (hit.get("Code") or "").strip().upper()
+        exch = (hit.get("Exchange") or "").strip().upper()
+        if not code or not exch:
+            continue
+        if want_exch and exch != want_exch:
+            continue
+        if code == query or (not want_exch and hit.get("isPrimary")):
+            return f"{code}.{exch}"
+    return None
 
 
 def _get_json(path: str, params: dict[str, Any]) -> Any:
@@ -116,7 +174,11 @@ def _get_json(path: str, params: dict[str, Any]) -> Any:
             "Check EODHD_API_KEY and that your plan covers this endpoint."
         )
     if resp.status_code == 404:
-        raise EODHDError(f"EODHD 404 for {path} params={params}: symbol/exchange not found.")
+        raise EODHDNotFoundError(
+            f"EODHD 404 for {path} params={params}: symbol/exchange not found. "
+            "Confirm the ticker on eodhd.com; Indian and other markets require the "
+            "All-World plan (free trial keys are often US-only)."
+        )
     if resp.status_code == 429:
         raise EODHDError("EODHD rate-limited (HTTP 429). Slow down or upgrade your plan.")
     if resp.status_code >= 400:
@@ -138,7 +200,15 @@ def fetch_ohlcv(symbol: str, *, period: str = "d") -> pd.DataFrame:
     ``Open / High / Low / Close / Adjusted_close / Volume``.
     """
     sym = normalize_symbol(symbol)
-    payload = _get_json(f"eod/{sym}", {"period": period, "order": "a"})
+    try:
+        payload = _get_json(f"eod/{sym}", {"period": period, "order": "a"})
+    except EODHDNotFoundError:
+        resolved = _search_resolved_symbol(symbol)
+        if resolved and resolved != sym:
+            sym = resolved
+            payload = _get_json(f"eod/{sym}", {"period": period, "order": "a"})
+        else:
+            raise
     if not isinstance(payload, list) or not payload:
         raise EODHDError(f"Empty OHLCV response for {sym}.")
 
