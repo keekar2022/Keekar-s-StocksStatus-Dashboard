@@ -5,9 +5,25 @@
 
 from __future__ import annotations
 
+import re
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+
+
+def _sanitize_chart_key(key: str) -> str:
+    """Streamlit element keys: unique, stable, alphanumeric-ish."""
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", key)[:200]
+
+
+def _unique_plotly_key(chart_key: str) -> str:
+    """Ensure uniqueness across reruns and many charts on one page."""
+    if "plotly_chart_seq" not in st.session_state:
+        st.session_state.plotly_chart_seq = 0
+    st.session_state.plotly_chart_seq += 1
+    seq = st.session_state.plotly_chart_seq
+    return _sanitize_chart_key(f"{chart_key}_{seq}")
 
 
 def _ensure_datetime_index(df: pd.DataFrame) -> pd.DataFrame:
@@ -17,7 +33,12 @@ def _ensure_datetime_index(df: pd.DataFrame) -> pd.DataFrame:
     return out.sort_index()
 
 
-def render_candlestick(df: pd.DataFrame, *, title: str | None = None) -> None:
+def render_candlestick(
+    df: pd.DataFrame,
+    *,
+    title: str | None = None,
+    chart_key: str,
+) -> None:
     """OHLC candlestick chart (requires Open, High, Low, Close)."""
     if df is None or df.empty:
         st.caption("No OHLC data for candlestick chart.")
@@ -49,7 +70,7 @@ def render_candlestick(df: pd.DataFrame, *, title: str | None = None) -> None:
         template="plotly_white",
     )
     fig.update_yaxes(tickprefix="$", tickformat=",.2f")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=_unique_plotly_key(chart_key))
 
 
 def render_candlestick_with_overlays(
@@ -57,6 +78,7 @@ def render_candlestick_with_overlays(
     overlay_cols: list[str],
     *,
     title: str | None = None,
+    chart_key: str,
 ) -> None:
     """Candlestick plus optional line overlays (EMAs, PSAR) on the same panel."""
     if ohlcv is None or ohlcv.empty:
@@ -99,7 +121,7 @@ def render_candlestick_with_overlays(
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
     )
     fig.update_yaxes(tickprefix="$", tickformat=",.2f")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=_unique_plotly_key(chart_key))
 
 
 def render_indicator_lines(
@@ -108,6 +130,7 @@ def render_indicator_lines(
     *,
     title: str | None = None,
     y_prefix: str = "",
+    chart_key: str,
 ) -> None:
     """Multi-series line chart for MACD, RSI, volume indicators, etc."""
     if df is None or df.empty:
@@ -133,4 +156,4 @@ def render_indicator_lines(
     )
     if y_prefix:
         fig.update_yaxes(tickprefix=y_prefix)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=_unique_plotly_key(chart_key))

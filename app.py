@@ -46,7 +46,11 @@ from stocks_dashboard.ui_charts import (
     render_candlestick_with_overlays,
     render_indicator_lines,
 )
-from stocks_dashboard.ui_screener import inject_screener_like_css, render_quote_hero
+from stocks_dashboard.ui_screener import (
+    inject_screener_like_css,
+    render_app_info_panel,
+    render_quote_hero,
+)
 from stocks_dashboard.secrets_loader import apply_streamlit_secrets
 from stocks_dashboard.user_prefs import load_symbols_text, save_symbols_text
 from stocks_dashboard.valuation import attach_pe_to_frame, load_valuation_context
@@ -60,34 +64,40 @@ APP_TITLE = "Keekar's Stocks Status Dashboard"
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 apply_streamlit_secrets()
 inject_screener_like_css()
-st.title(APP_TITLE)
-st.caption(
-    "Data loads automatically from cache or live sources. Use **Refresh data** on each tab to fetch again."
+_SINGLE_API_BLURB = (
+    "Single-API mode: **EODHD** serves global OHLCV. SEC EDGAR is a free US-only "
+    "fundamentals enhancer. Set `LEGACY_SOURCES=true` to re-enable the older Yahoo / "
+    "Alpha Vantage / Investing chain."
 )
-st.caption(
-    "Single-API mode: **EODHD** serves global OHLCV. SEC EDGAR is a free US-only fundamentals enhancer. "
-    "Set `LEGACY_SOURCES=true` to re-enable the older Yahoo / Alpha Vantage / Investing chain."
+_ATTRIBUTION_LINE = (
+    "Innovator & concept: **Satyan Bansal** ([satyan.bansal@gmail.com](mailto:satyan.bansal@gmail.com)) · "
+    "Developer: **Mukesh Kesharwani**"
 )
 
 
-def _render_version_footer() -> None:
+def _render_header_row() -> None:
     info = get_version_info()
-    line = footer_markdown(info)
-    credit = (
-        "**Innovator:** Satyan Bansal · **Developer:** Mukesh Kesharwani  \n"
-        "Concept by Satyan; implementation by Mukesh."
-    )
-    st.sidebar.caption(f"**{APP_TITLE}**")
-    st.sidebar.caption(credit)
-    st.sidebar.caption(line)
-    st.caption(f"Build: {line}")
-    st.caption(
-        "Innovator & concept: **Satyan Bansal** (satyan.bansal@gmail.com) · "
-        "Developer: **Mukesh Kesharwani**"
-    )
+    build_line = footer_markdown(info)
+    try:
+        col_main, col_info = st.columns([2.4, 1], gap="medium", vertical_alignment="top")
+    except TypeError:
+        col_main, col_info = st.columns([2.4, 1], gap="medium")
+    with col_main:
+        st.title(APP_TITLE)
+        st.caption(
+            "Data loads automatically from cache or live sources. Use **Refresh data** "
+            "on each tab to fetch again."
+        )
+    with col_info:
+        with st.container(border=True):
+            render_app_info_panel(
+                single_api_blurb=_SINGLE_API_BLURB,
+                build_line=build_line,
+                attribution_line=_ATTRIBUTION_LINE,
+            )
 
 
-_render_version_footer()
+_render_header_row()
 
 
 def _bare_symbol(sym: str) -> str:
@@ -98,6 +108,16 @@ def _bare_symbol(sym: str) -> str:
 def _is_us(sym: str) -> bool:
     s = (sym or "").strip().upper()
     return ("." not in s) or s.endswith(".US")
+
+
+def _ui_key(sym: str, scope: str, element_id: str) -> str:
+    """Unique Streamlit widget key (symbol + scope + id)."""
+    safe_sym = sym.strip().upper().replace(".", "_")
+    return f"{safe_sym}_{scope}_{element_id}"
+
+
+def _chart_key(sym: str, horizon: str, chart_id: str) -> str:
+    return _ui_key(sym, horizon, chart_id)
 
 
 def _edgar_cik_map() -> dict[str, int] | None:
@@ -256,7 +276,11 @@ If your plan does not include fundamentals (HTTP 403), it falls back to **SEC ED
             if row.df is not None:
                 st.markdown("**Financial snapshot**")
                 st.caption("Currency rows in **M** / **B**; ratios and EPS unchanged.")
-                st.dataframe(format_fundamentals_display(row.df), use_container_width=True)
+                st.dataframe(
+                    format_fundamentals_display(row.df),
+                    use_container_width=True,
+                    key=_ui_key(row.symbol, "fund", "table"),
+                )
                 note = "" if row.primary_source.startswith("Alpha Vantage") else direction_note(row.df)
                 if note:
                     st.text("Approx. change first→last column (where numeric):")
@@ -266,7 +290,10 @@ If your plan does not include fundamentals (HTTP 403), it falls back to **SEC ED
                     "No fundamentals returned. For US tickers ensure `SEC_USER_AGENT` is set; "
                     "for non-US tickers enable EODHD fundamentals on your plan."
                 )
-            with st.expander("Source attempt log"):
+            with st.expander(
+                "Source attempt log",
+                key=_ui_key(row.symbol, "fund", "log"),
+            ):
                 for src, msg in row.log:
                     st.text(f"{src}: {msg}")
 
@@ -319,26 +346,63 @@ def _render_technical_for_symbol(sym: str, full_hist: pd.DataFrame, primary_sour
                 "ROIC / ROE latest (EODHD or Yahoo, if available)",
                 f"{val_ctx.roic_latest * 100:.2f}%",
                 help="Fundamental ratio from EODHD fundamentals or Yahoo metadata.",
+                key=_chart_key(sym, horizon, "roic_metric"),
             )
 
-        with st.expander("Price & trend (candlestick + EMAs, PSAR)", expanded=True):
+        with st.expander(
+            "Price & trend (candlestick + EMAs, PSAR)",
+            expanded=True,
+            key=_chart_key(sym, horizon, "exp_price"),
+        ):
             render_candlestick_with_overlays(
                 win,
                 ["EMA_20", "EMA_50", "EMA_200"],
                 title="OHLC with EMAs",
+                chart_key=_chart_key(sym, horizon, "ohlc_ema"),
             )
-            render_indicator_lines(win, ["Close", "PSAR"], title="Close vs PSAR")
+            render_indicator_lines(
+                win,
+                ["Close", "PSAR"],
+                title="Close vs PSAR",
+                chart_key=_chart_key(sym, horizon, "psar"),
+            )
 
-        with st.expander("Momentum (MACD, RSI)", expanded=False):
-            render_indicator_lines(out, ["MACD", "MACD_signal", "MACD_hist"], title="MACD")
-            render_indicator_lines(out, ["RSI_14"], title="RSI (14)")
+        with st.expander(
+            "Momentum (MACD, RSI)",
+            expanded=False,
+            key=_chart_key(sym, horizon, "exp_momentum"),
+        ):
+            render_indicator_lines(
+                out,
+                ["MACD", "MACD_signal", "MACD_hist"],
+                title="MACD",
+                chart_key=_chart_key(sym, horizon, "macd"),
+            )
+            render_indicator_lines(
+                out,
+                ["RSI_14"],
+                title="RSI (14)",
+                chart_key=_chart_key(sym, horizon, "rsi"),
+            )
 
-        with st.expander("Volume (OBV, ADL)", expanded=False):
-            render_indicator_lines(out, ["OBV"], title="OBV")
-            render_indicator_lines(out, ["ADL"], title="ADL")
+        with st.expander(
+            "Volume (OBV, ADL)",
+            expanded=False,
+            key=_chart_key(sym, horizon, "exp_volume"),
+        ):
+            render_indicator_lines(
+                out, ["OBV"], title="OBV", chart_key=_chart_key(sym, horizon, "obv")
+            )
+            render_indicator_lines(
+                out, ["ADL"], title="ADL", chart_key=_chart_key(sym, horizon, "adl")
+            )
 
         if is_us and val_ctx is not None:
-            with st.expander("Valuation proxy (PE)", expanded=False):
+            with st.expander(
+                "Valuation proxy (PE)",
+                expanded=False,
+                key=_chart_key(sym, horizon, "exp_pe"),
+            ):
                 if "PE_TTM_proxy" not in out.columns:
                     st.caption(
                         "No PE data. Enable `EODHD_FUNDAMENTALS_ENABLED=true` or `YAHOO_PE_ROIC_ENABLE=true`."
@@ -346,7 +410,12 @@ def _render_technical_for_symbol(sym: str, full_hist: pd.DataFrame, primary_sour
                 else:
                     pe = out[["PE_TTM_proxy"]].dropna(how="all")
                     if not pe.empty:
-                        render_indicator_lines(pe, ["PE_TTM_proxy"], title="PE (TTM proxy)")
+                        render_indicator_lines(
+                            pe,
+                            ["PE_TTM_proxy"],
+                            title="PE (TTM proxy)",
+                            chart_key=_chart_key(sym, horizon, "pe"),
+                        )
                         if val_ctx.eodhd_trailing_pe is not None and not yahoo_pe_roic_enabled():
                             st.caption(
                                 f"Flat line: EODHD trailing P/E ≈ {val_ctx.eodhd_trailing_pe:.2f} "
@@ -358,13 +427,22 @@ def _render_technical_for_symbol(sym: str, full_hist: pd.DataFrame, primary_sour
                         )
 
         if is_us and val_ctx is not None and horizon == "5Y":
-            with st.expander("ROIC — annual approximation (Yahoo statements)", expanded=False):
+            with st.expander(
+                "ROIC — annual approximation (Yahoo statements)",
+                expanded=False,
+                key=_chart_key(sym, horizon, "exp_roic"),
+            ):
                 if not val_ctx.roic_annual.empty:
-                    st.dataframe(val_ctx.roic_annual, use_container_width=True)
+                    st.dataframe(
+                        val_ctx.roic_annual,
+                        use_container_width=True,
+                        key=_chart_key(sym, horizon, "roic_table"),
+                    )
                     render_indicator_lines(
                         val_ctx.roic_annual.set_index("period"),
                         ["ROIC_approx"],
                         title="ROIC (annual approx)",
+                        chart_key=_chart_key(sym, horizon, "roic_annual"),
                     )
                 else:
                     st.caption(
@@ -403,6 +481,9 @@ def _render_technical_tab(syms: list[str]) -> None:
         st.info("No OHLCV data loaded yet.")
         return
 
+    loaded = [s.strip().upper() for s in syms if ohlcv_map.get(s.strip().upper())]
+    st.caption(f"Showing **{len(loaded)}** of **{len(syms)}** symbol(s) — scroll for all tickers.")
+
     for sym in syms:
         key = sym.strip().upper()
         cached = ohlcv_map.get(key)
@@ -438,7 +519,7 @@ def _render_patterns_tab(syms: list[str]) -> None:
         st.info("No OHLCV data loaded yet.")
         return
 
-    def _pattern_horizon(full_hist: pd.DataFrame, horizon: Horizon) -> None:
+    def _pattern_horizon(full_hist: pd.DataFrame, horizon: Horizon, sym_key: str) -> None:
         try:
             win = slice_trading_window(full_hist, horizon)
         except YahooOHLCVError as exc:
@@ -447,8 +528,16 @@ def _render_patterns_tab(syms: list[str]) -> None:
         if horizon == "1W":
             st.caption("~**One trading week** (5 sessions).")
         rows = scan_patterns(win)
-        st.dataframe(pd.DataFrame([r.__dict__ for r in rows]), use_container_width=True)
-        render_candlestick(win, title="OHLC")
+        st.dataframe(
+            pd.DataFrame([r.__dict__ for r in rows]),
+            use_container_width=True,
+            key=_chart_key(sym_key, horizon, "pat_table"),
+        )
+        render_candlestick(
+            win,
+            title="OHLC",
+            chart_key=_chart_key(sym_key, horizon, "pat_ohlc"),
+        )
 
     for sym in syms:
         key = sym.strip().upper()
@@ -469,15 +558,15 @@ def _render_patterns_tab(syms: list[str]) -> None:
             ["1 week (~5)", "1 month (~21)", "6 months (~126)", "1 year (~252)", "5 years"],
         )
         with tw:
-            _pattern_horizon(full_hist, "1W")
+            _pattern_horizon(full_hist, "1W", key)
         with tm:
-            _pattern_horizon(full_hist, "1M")
+            _pattern_horizon(full_hist, "1M", key)
         with ts_tab:
-            _pattern_horizon(full_hist, "6M")
+            _pattern_horizon(full_hist, "6M", key)
         with ty:
-            _pattern_horizon(full_hist, "1Y")
+            _pattern_horizon(full_hist, "1Y", key)
         with tf:
-            _pattern_horizon(full_hist, "5Y")
+            _pattern_horizon(full_hist, "5Y", key)
 
 
 with st.sidebar:

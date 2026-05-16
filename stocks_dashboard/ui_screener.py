@@ -17,12 +17,27 @@ _SCSS = """
     /* Layout polish inspired by clean equity research UIs (original CSS). */
     div[data-testid="stMetricValue"] { font-variant-numeric: tabular-nums; }
     .sd-section-title { font-size: 0.95rem; font-weight: 600; color: #047857; margin: 0.35rem 0 0.5rem 0; }
+    .sd-info-panel { font-size: 0.82rem; line-height: 1.45; color: #334155; }
 </style>
 """
 
 
 def inject_screener_like_css() -> None:
     st.markdown(_SCSS, unsafe_allow_html=True)
+
+
+def render_app_info_panel(
+    *,
+    single_api_blurb: str,
+    build_line: str,
+    attribution_line: str,
+) -> None:
+    """Content for the right-aligned info box (call inside ``st.container(border=True)``)."""
+    st.markdown('<div class="sd-info-panel">', unsafe_allow_html=True)
+    st.markdown(single_api_blurb)
+    st.markdown(f"**Build:** {build_line}")
+    st.markdown(attribution_line)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_quote_hero(symbol: str, df: pd.DataFrame, ohlcv_source: str) -> None:

@@ -63,8 +63,18 @@ If this is missing, the sidebar shows an **info** message (not an error). US sym
 
 | Environment | Source |
 | ----------- | ------ |
-| Local | `.env` via `python-dotenv` |
+| Local | `.env` via `python-dotenv`, and optionally `.streamlit/secrets.toml` |
 | Streamlit Cloud | **Secrets** → copied into `os.environ` by `stocks_dashboard/secrets_loader.py` |
+
+### Keep local `.env` and `secrets.toml` in sync
+
+After editing `.env`:
+
+```bash
+python scripts/sync_secrets_from_env.py
+```
+
+This writes `.streamlit/secrets.toml` (gitignored) so `st.secrets` works locally without errors.
 
 ## 5. Common hosted-app messages
 

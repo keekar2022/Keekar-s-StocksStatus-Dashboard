@@ -1,7 +1,7 @@
 # Concept: Mukesh Kesharwani
 # Contact: mukesh.kesharwani@adobe.com
 
-"""Load Streamlit Cloud secrets into os.environ (`.env` is not deployed)."""
+"""Load Streamlit Cloud secrets into os.environ (``.env`` is used for local dev)."""
 
 from __future__ import annotations
 
@@ -25,33 +25,37 @@ _SECRET_KEYS = (
 )
 
 
+def _set_from_mapping(mapping: object) -> None:
+    if not hasattr(mapping, "items"):
+        return
+    for key, value in mapping.items():
+        if key in _SECRET_KEYS and value is not None:
+            text = str(value).strip()
+            if text and not (os.environ.get(key) or "").strip():
+                os.environ[key] = text
+
+
 def apply_streamlit_secrets() -> None:
     """
     Copy ``st.secrets`` into ``os.environ`` when not already set.
 
-    On Streamlit Community Cloud, configure App settings → Secrets (TOML).
-    Local dev uses .env via load_dotenv.
+    Local dev: use ``.env`` (``load_dotenv`` in ``app.py``). No ``secrets.toml`` required.
+    Streamlit Cloud: configure App settings → Secrets (TOML).
     """
     try:
         import streamlit as st
+        from streamlit.errors import StreamlitSecretNotFoundError
     except ImportError:
         return
 
     try:
-        secrets_obj = st.secrets
-    except Exception:
+        _set_from_mapping(st.secrets)
+        if hasattr(st.secrets, "get"):
+            env_section = st.secrets.get("env")
+            if env_section is not None:
+                _set_from_mapping(env_section)
+    except StreamlitSecretNotFoundError:
+        # No secrets.toml locally — expected; .env supplies variables instead.
         return
-
-    def _set_from_mapping(mapping: object) -> None:
-        if not hasattr(mapping, "items"):
-            return
-        for key, value in mapping.items():
-            if key in _SECRET_KEYS and value is not None:
-                text = str(value).strip()
-                if text and not (os.environ.get(key) or "").strip():
-                    os.environ[key] = text
-
-    _set_from_mapping(secrets_obj)
-    # Support optional [env] section in secrets.toml
-    if hasattr(secrets_obj, "get"):
-        _set_from_mapping(secrets_obj.get("env"))
+    except (AttributeError, TypeError, KeyError):
+        return
