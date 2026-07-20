@@ -28,6 +28,7 @@ Approximate size of **first-party code** in this repository (May 2026):
 | --- | --- | --- |
 | **Concept & Innovation** | Satyan Bansal | [satyan.bansal@gmail.com](mailto:satyan.bansal@gmail.com) |
 | **Developer (implementation)** | Mukesh Kesharwani | [mukesh.kesharwani@adobe.com](mailto:mukesh.kesharwani@adobe.com) |
+| **Developer (implementation)** | Shristhi Kesharwani | Shrishtikesharwani23 |
 
 The dashboard **concept** — a single view of key stock parameters across fundamentals, technicals, and patterns — was introduced by **Satyan Bansal**. **Mukesh Kesharwani** developed the code, integrations, and UI in this repository.
 
