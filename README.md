@@ -1,5 +1,5 @@
 # Concept & Innovation: Satyan Bansal — satyan.bansal@gmail.com
-# Developer: Mukesh Kesharwani — mukesh.kesharwani@adobe.com
+# Developer: Shrishti Kesharwani & Mukesh Kesharwani — mukesh.kesharwani@adobe.com
 
 # Keekar's Stocks Status Dashboard
 
